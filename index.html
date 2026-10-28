@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FW-01 Teste de Voz</title>
+<style>
+:root{--bg:#101712;--panel:#18221B;--ink:#E6EEE8;--muted:#9AAAA1;--rule:#2C3A32;--green:#6FBF93;--gs:#1F3228;--sig:#F08A4E;--stop:#EE6B5E;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:18px/1.4 "Segoe UI",Roboto,Arial,sans-serif}
+.app{height:100%;display:grid;grid-template-columns:1fr 380px;gap:16px;padding:16px}
+@media (max-width:900px){.app{grid-template-columns:1fr;height:auto}}
+.left{display:grid;grid-template-rows:auto 1fr auto;gap:12px;min-height:0}
+h1{margin:0;font-size:1.6rem;letter-spacing:.02em}
+h1 small{color:var(--muted);font-size:.9rem;font-weight:400;margin-left:8px}
+canvas{width:100%;height:100%;min-height:320px;background:var(--panel);border:2px solid var(--rule);border-radius:6px;display:block}
+.heard{background:var(--panel);border:2px solid var(--rule);border-radius:6px;padding:14px 18px;display:grid;gap:4px}
+.heard .lbl{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.1em}
+.heard .txt{font-size:2rem;font-weight:700;min-height:2.6rem}
+.heard .act{font-size:1.1rem;color:var(--green)}
+.heard .act.bad{color:var(--sig)} .heard .act.stop{color:var(--stop)}
+.right{display:grid;gap:12px;align-content:start}
+.mic{font-size:1.4rem;font-weight:700;padding:22px;border-radius:999px;border:0;background:var(--green);color:#0c1a12;cursor:pointer}
+.mic.on{background:var(--stop);color:#fff;animation:pulse 1.4s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 14px rgba(238,107,94,.18)}}
+.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.btns button{font-size:1.05rem;font-weight:600;padding:16px 4px;border-radius:8px;border:2px solid var(--rule);background:var(--panel);color:var(--ink);cursor:pointer}
+.btns button.stop{background:var(--stop);border-color:var(--stop);color:#fff}
+.opts{display:grid;gap:8px;background:var(--panel);border:2px solid var(--rule);border-radius:6px;padding:12px 14px;font-size:.95rem}
+.opts label{display:flex;gap:10px;align-items:center}
+.score{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.score div{background:var(--panel);border:2px solid var(--rule);border-radius:6px;padding:8px}
+.score b{display:block;font-size:1.6rem;font-variant-numeric:tabular-nums}
+.score span{color:var(--muted);font-size:.8rem}
+.log{background:var(--panel);border:2px solid var(--rule);border-radius:6px;padding:10px 12px;height:180px;overflow-y:auto;font:.85rem/1.5 Consolas,monospace}
+.log .ok{color:var(--green)} .log .no{color:var(--sig)} .log .m{color:var(--muted)}
+.warn{background:#3A2519;color:#F8C9A8;border-radius:6px;padding:12px 14px;font-size:.95rem}
+button:focus-visible{outline:3px solid var(--sig);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="left">
+    <h1>Forest Walker FW-01 <small>teste de comando de voz</small></h1>
+    <canvas id="c"></canvas>
+    <div class="heard"><span class="lbl">A cadeira ouviu</span><span class="txt" id="txt">—</span><span class="act" id="act">Toque em "Começar a ouvir" e fale um comando.</span></div>
+  </div>
+  <div class="right">
+    <div class="warn" id="nosupport" hidden>Este navegador não tem reconhecimento de voz. Abra este arquivo no <b>Google Chrome</b> (computador ou notebook), com internet e microfone.</div>
+    <button class="mic" id="mic">🎤 Começar a ouvir</button>
+    <div class="btns">
+      <button data-c="frente">Frente</button><button data-c="devagar">Devagar</button><button data-c="esquerda">Esquerda</button>
+      <button data-c="direita">Direita</button><button class="stop" data-c="pare">PARE</button><button data-c="trás">Para trás</button>
+      <button data-c="em pé">Em pé</button><button data-c="sentar">Sentar</button><button data-c="reiniciar">Reiniciar</button>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="wake"> Exigir a palavra "Walker" antes do comando</label>
+      <label><input type="checkbox" id="beep" checked> Bip ao entender o comando</label>
+      <label><input type="checkbox" id="obs" checked> Árvores na trilha (parada automática)</label>
+    </div>
+    <div class="score"><div><b id="sOk">0</b><span>entendidos</span></div><div><b id="sNo">0</b><span>não entendidos</span></div><div><b id="sPct">—</b><span>acerto</span></div></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$("c"), cx=cv.getContext("2d");
+let W=0,H=0,M=60;
+function fit(){const r=cv.getBoundingClientRect();const d=devicePixelRatio||1;cv.width=r.width*d;cv.height=r.height*d;W=cv.width;H=cv.height;M=Math.min(W/16,H/10);}
+addEventListener("resize",fit);
+const treesBase=[[3.2,2.2,.35],[6.4,6.8,.4],[11.2,3.4,.45],[13.5,7.6,.35],[8.8,1.3,.3],[2.0,8.2,.4],[14.6,1.8,.3],[9.6,8.6,.3],[5.2,4.9,.25]];
+let sim;
+function reset(){sim={x:1.6,y:5.0,h:0,v:0,cmdV:0,turn:0,stand:false,standT:0,trail:[]};}
+reset();
+const logEl=$("log");
+function log(cls,t){const d=document.createElement("div");d.className=cls;d.textContent=t;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+let ok=0,no=0;
+function score(){$("sOk").textContent=ok;$("sNo").textContent=no;$("sPct").textContent=(ok+no)?Math.round(100*ok/(ok+no))+"%":"—";}
+let actx=null;
+function beep(f=880,d=.12){if(!$("beep").checked)return;try{actx=actx||new AudioContext();const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.connect(g);g.connect(actx.destination);g.gain.setValueAtTime(.2,actx.currentTime);g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+d);o.start();o.stop(actx.currentTime+d);}catch(e){}}
+function act(t,cls=""){const a=$("act");a.textContent=t;a.className="act "+cls;}
+const norm=s=>s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[.,!?]/g," ").replace(/\s+/g," ").trim();
+const RULES=[
+  [/\b(pare|para|parar|stop|chega)\b(?! (tras|atras))/,"pare"],
+  [/\b(tras|atras|re|volta|voltar)\b/,"tras"],
+  [/\b(esquerda)\b/,"esquerda"],
+  [/\b(direita)\b/,"direita"],
+  [/\b(devagar|lento|devagarinho)\b/,"devagar"],
+  [/\b(em pe|de pe|levanta|levantar|sobe)\b/,"empe"],
+  [/\b(senta|sentar|sentada|desce)\b/,"sentar"],
+  [/\b(frente|ande|anda|vai|vamos|siga|segue)\b/,"frente"],
+];
+function interpret(raw, fromVoice){
+  let c=norm(raw);
+  if(fromVoice && $("wake").checked){ if(!/\b(walker|uoker|woker|uolker)\b/.test(c)){log("m",`Ignorado (sem "Walker"): "${raw}"`);return;} }
+  let cmd=null; for(const [re,k] of RULES){ if(re.test(c)){cmd=k;break;} }
+  if(c==="reiniciar"){reset();act("Posição reiniciada.");return;}
+  if(!cmd){ if(fromVoice){no++;score();} log("no",`✗ "${raw}"`); act("Não entendi. Tente de novo, mais devagar.","bad"); beep(260,.2); return; }
+  if(fromVoice){ok++;score();}
+  log("ok",`✓ "${raw}" → ${cmd}`); beep();
+  const vmax = sim.stand ? .28 : 1.1;
+  switch(cmd){
+    case "pare": sim.cmdV=0;sim.v=0;sim.turn=0;act("PARADA","stop");break;
+    case "frente": sim.cmdV=vmax;sim.turn=0;act(sim.stand?"Andando devagar (de pé)":"Andando para a frente");break;
+    case "devagar": sim.cmdV=Math.min(vmax,.35);act("Velocidade reduzida");break;
+    case "tras": sim.cmdV=-.35;sim.turn=0;act("Dando ré");break;
+    case "esquerda": sim.turn=-Math.PI/2;act("Virando à esquerda");break;
+    case "direita": sim.turn=Math.PI/2;act("Virando à direita");break;
+    case "empe": if(Math.abs(sim.v)>.01||sim.cmdV){act("Pare antes de ficar de pé","bad");break;} sim.stand=true;act("Subindo para o modo de pé");break;
+    case "sentar": if(Math.abs(sim.v)>.01||sim.cmdV){act("Pare antes de sentar","bad");break;} sim.stand=false;act("Voltando a sentar");break;
+  }
+}
+document.querySelectorAll(".btns button").forEach(b=>b.onclick=()=>{ $("txt").textContent=b.textContent; interpret(b.dataset.c,false); });
+
+// speech
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null, listening=false;
+if(!SR){$("nosupport").hidden=false;$("mic").disabled=true;}
+else{
+  rec=new SR(); rec.lang="pt-BR"; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=3;
+  rec.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const r=e.results[i]; const t=r[0].transcript.trim();
+      $("txt").textContent=t||"—";
+      if(r.isFinal){
+        // try alternatives if the first isn't a command
+        let chosen=t;
+        for(let k=0;k<r.length;k++){ const a=norm(r[k].transcript); if(RULES.some(([re])=>re.test(a))){chosen=r[k].transcript.trim();break;} }
+        interpret(chosen,true);
+      }
+    }
+  };
+  rec.onerror=e=>{ if(e.error==="not-allowed"){act("Microfone bloqueado. Permita o microfone no Chrome.","bad");listening=false;ui();} else if(e.error!=="no-speech") log("m","Aviso: "+e.error); };
+  rec.onend=()=>{ if(listening){ try{rec.start();}catch(e){} } };
+}
+function ui(){ $("mic").classList.toggle("on",listening); $("mic").textContent=listening?"■ Parar de ouvir":"🎤 Começar a ouvir"; }
+$("mic").onclick=()=>{ if(!rec)return; listening=!listening; if(listening){try{rec.start();}catch(e){} act("Ouvindo… fale um comando.");} else {rec.stop();act("Microfone desligado.");} ui(); };
+
+function clearance(){
+  const dir = sim.cmdV>=0 ? sim.h : sim.h+Math.PI; let best=99;
+  if($("obs").checked) for(const [tx,ty,r] of treesBase){const dx=tx-sim.x,dy=ty-sim.y;const d=Math.hypot(dx,dy)-r-.45;let a=Math.atan2(dy,dx)-dir;a=Math.atan2(Math.sin(a),Math.cos(a));if(Math.abs(a)<.45)best=Math.min(best,d);}
+  const fx=Math.cos(dir),fy=Math.sin(dir),Wm=16,Hm=10;
+  const wx=fx>0?(Wm-.4-sim.x)/fx:fx<0?(.4-sim.x)/fx:99, wy=fy>0?(Hm-.4-sim.y)/fy:fy<0?(.4-sim.y)/fy:99;
+  return Math.min(best,wx,wy);
+}
+let last=performance.now();
+function tick(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  if(sim.turn){const s=Math.sign(sim.turn)*Math.min(Math.abs(sim.turn),1.6*dt);sim.h+=s;sim.turn-=s;if(Math.abs(sim.turn)<1e-3)sim.turn=0;}
+  const clr=clearance(); let want=sim.cmdV;
+  if(want && clr<1.0){want=0;sim.cmdV=0;act(`Obstáculo a ${clr.toFixed(1).replace(".",",")} m — parada automática`,"stop");log("no","Parada automática por obstáculo");beep(330,.3);}
+  sim.v+=(want-sim.v)*Math.min(1,dt*3); if(Math.abs(sim.v)<.005)sim.v=0;
+  sim.x+=Math.cos(sim.h)*sim.v*dt; sim.y+=Math.sin(sim.h)*sim.v*dt;
+  sim.standT+=((sim.stand?1:0)-sim.standT)*Math.min(1,dt*1.5);
+  if(sim.v){sim.trail.push([sim.x,sim.y]);if(sim.trail.length>500)sim.trail.shift();}
+  draw(clr); requestAnimationFrame(tick);
+}
+function draw(clr){
+  if(!W) fit();
+  const ox=(W-16*M)/2, oy=(H-10*M)/2;
+  cx.fillStyle="#18221B";cx.fillRect(0,0,W,H);
+  cx.save();cx.translate(ox,oy);
+  cx.strokeStyle="#2C3A32";cx.lineWidth=1;
+  for(let x=0;x<=16;x++){cx.beginPath();cx.moveTo(x*M,0);cx.lineTo(x*M,10*M);cx.stroke();}
+  for(let y=0;y<=10;y++){cx.beginPath();cx.moveTo(0,y*M);cx.lineTo(16*M,y*M);cx.stroke();}
+  cx.fillStyle="#1F3228";for(const [x,y] of sim.trail){cx.beginPath();cx.arc(x*M,y*M,M*.18,0,7);cx.fill();}
+  if($("obs").checked) for(const [x,y,r] of treesBase){cx.fillStyle="rgba(111,191,147,.22)";cx.beginPath();cx.arc(x*M,y*M,r*M*2.4,0,7);cx.fill();cx.fillStyle="#3E8A62";cx.beginPath();cx.arc(x*M,y*M,r*M,0,7);cx.fill();}
+  const dir=sim.cmdV>=0?sim.h:sim.h+Math.PI;
+  cx.save();cx.translate(sim.x*M,sim.y*M);
+  cx.fillStyle=clr<1?"rgba(238,107,94,.2)":"rgba(240,138,78,.16)";cx.beginPath();cx.moveTo(0,0);cx.arc(0,0,3*M,dir-.45,dir+.45);cx.closePath();cx.fill();
+  cx.rotate(sim.h);
+  const s=M/60*(1+.25*sim.standT);
+  cx.scale(s,s);
+  cx.fillStyle="#E6EEE8";[[-22,-26],[14,-26],[-22,20],[14,20]].forEach(([x,y])=>cx.fillRect(x,y,14,8));
+  cx.fillStyle="#18221B";cx.strokeStyle="#E6EEE8";cx.lineWidth=3;cx.beginPath();cx.rect(-26,-18,54,36);cx.fill();cx.stroke();
+  cx.fillStyle=sim.standT>.5?"#F08A4E":"#E6EEE8";cx.beginPath();cx.arc(-6,0,9+4*sim.standT,0,7);cx.fill();
+  cx.fillStyle="#F08A4E";cx.beginPath();cx.moveTo(34,0);cx.lineTo(24,-8);cx.lineTo(24,8);cx.closePath();cx.fill();
+  cx.restore();cx.restore();
+}
+fit(); requestAnimationFrame(tick);
+log("m","Pronto. Comandos: frente, pare, esquerda, direita, para trás, devagar, em pé, sentar.");
+</script>
+</body>
+</html>
